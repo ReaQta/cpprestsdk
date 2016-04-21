@@ -244,6 +244,27 @@ TEST(cert_expired)
     handshake_error_test_impl(U("wss://tv.eurosport.com/"));
 }
 
+TEST(self_signed_cert_validate_certificates_false)
+{
+	websocket_client_config config;
+	config.set_validate_certificates(false);
+	websocket_client client(config);
+	bool connection_done = false;
+	try {
+		client.connect(U("wss://tv.eurosport.com/")).wait();
+		connection_done = true;
+		client.close( ).wait( );
+	}
+	catch (const websocket_exception &e) {
+		if (is_timeout(e.what())) {
+			// Since this test depends on an outside server sometimes it sporadically can fail due to timeouts
+			// especially on our build machines.
+			return;
+		}
+	}
+	VERIFY_IS_TRUE(connection_done);
+}
+
 #endif
 
 } // SUITE(authentication_tests)
