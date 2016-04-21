@@ -26,6 +26,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <winhttp.h>
+#include <vector>
+// cryptoapi
+#include <Wincrypt.h>
 #endif
 #include "cpprest/rawptrstream.h"
 #include "os_utilities.h"
@@ -175,6 +178,123 @@ TEST(ignore_server_cert_invalid,
         auto request = client.request(methods::GET).get();
         VERIFY_ARE_EQUAL(status_codes::OK, request.status_code());
     });
+}
+
+TEST(server_cert_context_callback_called)
+{
+	handle_timeout([] 
+	{
+		auto called = false;
+		http_client_config config;
+		config.set_server_cert_context_callback(
+			[&](native_handle cert_context) {
+			UNREFERENCED_PARAMETER( cert_context );
+			called = true;
+		});
+		http_client client(U("https://www.microsoft.com/"), config);
+		auto request = client.request(methods::GET).get();
+		VERIFY_ARE_EQUAL( status_codes::OK, request.status_code( ) );
+		VERIFY_IS_TRUE( called );
+	});
+}
+
+TEST(server_cert_context_callback_exceptions)
+{
+	handle_timeout([]
+	{
+		http_client_config config;
+		class TestException;
+		config.set_nativehandle_options([](native_handle)
+		{
+			throw std::runtime_error("The Test exception");
+		});
+		http_client client(U("https://www.microsoft.com/"), config);
+		VERIFY_THROWS(client.request(methods::GET).get(), std::runtime_error);
+	});
+}
+
+TEST(server_cert_context_not_null)
+{
+	handle_timeout( []
+	{
+		http_client_config config;
+		auto context_not_null = false;
+		config.set_server_cert_context_callback(
+			[&](native_handle cert_context) {
+			VERIFY_IS_NOT_NULL(cert_context);
+			context_not_null = cert_context != NULL;
+		});
+		http_client client(U("https://www.microsoft.com/"), config );
+		auto request = client.request(methods::GET).get();
+		VERIFY_ARE_EQUAL(status_codes::OK, request.status_code());
+		VERIFY_IS_TRUE(context_not_null);
+	} );
+}
+
+TEST(server_cert_context_client_pinning)
+{
+	auto hexStr = [](BYTE *data, int len)->std::string
+	{
+		std::stringstream ss;
+		ss << std::hex;
+		for (int i(0); i < len; ++i)
+			ss << (int)data[i];
+		return ss.str( );
+	};
+	auto get_cert_sha1 = [&](const PBYTE data, DWORD data_len, std::string &sha1)->bool
+	{
+		HCRYPTPROV prov;
+		HCRYPTHASH hash;
+		const uint16_t sha1_size = 20;
+		BYTE b_sha1[sha1_size]{};
+		DWORD cbHash = 0;
+		DWORD dwCount = sizeof(DWORD);
+		if (!CryptAcquireContextW(&prov, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+			return false;
+		if (!CryptCreateHash(prov, CALG_SHA1, 0, 0, &hash)) 
+		{
+			if (prov)CryptReleaseContext(prov, 0);
+			return false;
+		}
+		if (!CryptHashData(hash, data, data_len, 0))
+		{
+			if (hash)CryptDestroyHash(hash);
+			if (prov)CryptReleaseContext(prov, 0);
+			return false;
+		}
+		if (!CryptGetHashParam(hash, HP_HASHSIZE, reinterpret_cast<PBYTE>(&cbHash), &dwCount, 0))
+		{
+			if (hash)CryptDestroyHash( hash );
+			if (prov)CryptReleaseContext( prov, 0 );
+			return false;
+		}
+		if (!CryptGetHashParam(hash, HP_HASHVAL, b_sha1, &cbHash, 0))
+		{
+			if (hash)CryptDestroyHash(hash);
+			if (prov)CryptReleaseContext(prov, 0);
+			return false;
+		}		
+		sha1 = hexStr(b_sha1, sha1_size);
+		return true;
+	};
+	handle_timeout([&]
+	{
+		auto verified = false;
+		http_client_config config;
+		config.set_server_cert_context_callback(
+			[&](native_handle cert_context)
+		{ 
+			PCERT_CONTEXT p_cert = reinterpret_cast<PCERT_CONTEXT>(cert_context);
+			std::string sha1;
+			if (get_cert_sha1(p_cert->pbCertEncoded, p_cert->cbCertEncoded, sha1)) {
+				verified = "54c8ea585a12f8c78f37942810e6e3a4ae801432" == sha1;
+			}
+		});
+		http_client client(U("https://www.microsoft.com/"), config);
+		auto request = client.request(methods::GET).get();
+		VERIFY_ARE_EQUAL(status_codes::OK, request.status_code());
+		VERIFY_IS_TRUE(verified);
+	} );
 }
 #endif
 

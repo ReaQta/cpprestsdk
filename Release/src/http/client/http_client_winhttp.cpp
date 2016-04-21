@@ -417,7 +417,7 @@ protected:
         }
 
 #if 0 // Work in progress. Enable this to support server certificate revocation check
-        if( m_secure )
+        if(m_secure)
         {
             DWORD dwEnableSSLRevocOpt = WINHTTP_ENABLE_SSL_REVOCATION;
             if(!WinHttpSetOption(m_hSession, WINHTTP_OPTION_ENABLE_FEATURE, &dwEnableSSLRevocOpt, sizeof(dwEnableSSLRevocOpt)))
@@ -431,7 +431,7 @@ protected:
         if(WINHTTP_INVALID_STATUS_CALLBACK == WinHttpSetStatusCallback(
             m_hSession,
             &winhttp_client::completion_callback,
-            WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_HANDLES,
+            WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_HANDLES | WINHTTP_CALLBACK_FLAG_SEND_REQUEST,
             0))
         {
             return report_failure(_XPLATSTR("Error registering callback"));
@@ -1022,6 +1022,35 @@ private:
                     p_request_context->report_error(errorCode, build_error_msg(error_result));
                     break;
                 }
+
+			case WINHTTP_CALLBACK_STATUS_SENDING_REQUEST:
+				{
+					if (p_request_context->m_http_client->base_uri().scheme() != _XPLATSTR("https")) 
+					{
+						break;
+					}
+					PCERT_CONTEXT p_cert_context = NULL;
+					DWORD size = sizeof(p_cert_context);
+					if (!WinHttpQueryOption(hRequestHandle, WINHTTP_OPTION_SERVER_CERT_CONTEXT, &p_cert_context, &size)) 
+					{
+						auto errorCode = GetLastError();
+						p_request_context->report_error(errorCode, build_error_msg(errorCode, "WinHttpQueryOption"));
+						break;
+					}
+					auto client_config = p_request_context->m_http_client->client_config();
+					try 
+					{
+						client_config.invoke_server_cert_context_callback(p_cert_context);
+						if (p_cert_context)CertFreeCertificateContext(p_cert_context);
+					}
+					catch (...) 
+					{
+						if (p_cert_context)CertFreeCertificateContext( p_cert_context );
+						p_request_context->report_exception(std::current_exception());
+					}
+					break;
+				}
+
             case WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE :
                 {
                     if (!p_request_context->m_request.body())

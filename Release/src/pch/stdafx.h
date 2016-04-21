@@ -147,6 +147,9 @@
 #include "cpprest/details/http_server.h"
 #include "cpprest/http_listener.h"
 #include "cpprest/details/http_server_api.h"
+
+// cryptoapi
+#include <Wincrypt.h>
 #endif // _WIN32_WINNT >= _WIN32_WINNT_VISTA
 
 #ifdef _WIN32

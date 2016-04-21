@@ -105,6 +105,7 @@ public:
 #endif
 #if defined(_WIN32) && !defined(__cplusplus_winrt)
         , m_buffer_request(false)
+		, m_set_user_server_cert_context_callback([](native_handle)->void{})
 #endif
     {
     }
@@ -302,6 +303,28 @@ public:
     {
         m_buffer_request = buffer_request;
     }
+
+	/// <summary>
+	/// Sets a callback to check ssl context, at request sending time.
+	/// </summary>
+	/// <remarks>
+	/// The native_handle is the following type depending on the underlying platform:
+	///     Windows Desktop, WinHTTP - PCERT_CONTEXT ( the user MUST NOT release the PCERT_CONTEXT )
+	/// </remarks>
+	/// <param name="callback">A user callback allowing checks on the ssl context at request sending time.</param>
+	void set_server_cert_context_callback(const std::function<void(native_handle)> &callback )
+	{
+		m_set_user_server_cert_context_callback = callback;
+	}
+
+	/// <summary>
+	/// Gets the user's callback to allow for customization of the ssl context.
+	/// </summary>
+	void invoke_server_cert_context_callback(native_handle handle) const
+	{
+		m_set_user_server_cert_context_callback(handle);
+	}
+
 #endif
 #endif
 
@@ -396,6 +419,7 @@ private:
 #endif
 #if defined(_WIN32) && !defined(__cplusplus_winrt)
     bool m_buffer_request;
+	std::function<void( native_handle )> m_set_user_server_cert_context_callback;
 #endif
 };
 
